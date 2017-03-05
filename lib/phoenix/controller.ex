@@ -26,9 +26,20 @@ defmodule Phoenix.Controller do
         end
       end
 
-  An action is just a regular function that receives the connection
+  An action is a regular function that receives the connection
   and the request parameters as arguments. The connection is a
   `Plug.Conn` struct, as specified by the Plug library.
+
+  ## Options
+
+  When used, the controller supports the following options:
+
+    * `:namespace` - sets the namespace to properly inflect
+      the layout view. By default it uses the base alias
+      in your controller name
+
+    * `:log` - the level to log. When false, disables controller
+      logging
 
   ## Connection
 
@@ -43,16 +54,9 @@ defmodule Phoenix.Controller do
     * `Phoenix.Controller` - functions provided by Phoenix
       to support rendering, and other Phoenix specific behaviour
 
-  ## Rendering and layouts
-
-  One of the main features provided by controllers is the ability
-  to perform content negotiation and render templates based on
-  information sent by the client. Read `render/3` to learn more.
-
-  It is also important not to confuse `Phoenix.Controller.render/3`
-  with `Phoenix.View.render/3`. The former expects
-  a connection and relies on content negotiation while the latter is
-  connection-agnostic and typically invoked from your views.
+  IF you want to have functions that manipulate the connection
+  without fully implementing the controller, you can import both
+  modules directly instead of `use Phoenix.Controller`.
 
   ## Plug pipeline
 
@@ -77,34 +81,60 @@ defmodule Phoenix.Controller do
         end
       end
 
-  Check `Phoenix.Controller.Pipeline` for more information on `plug/2`
-  and how to customize the plug pipeline.
+  The `:authenticate` plug will be invoked before the action. If the
+  plug calls `Plug.Conn.halt/1` (which is by default imported into
+  controllers), it will halt the pipeline and won't inoke the action.
 
-  ## Options
+  ### Guards
 
-  When used, the controller supports the following options:
+  `plug/2` in controllers supports guards, allowing a developer to configure
+  a plug to only run in some particular action:
 
-    * `:namespace` - sets the namespace to properly inflect
-      the layout view. By default it uses the base alias
-      in your controller name
+      plug :authenticate, usernames: ["jose", "eric", "sonny"] when action in [:show, :edit]
+      plug :authenticate, usernames: ["admin"] when action in [:show, :edit] when not action in [:index]
 
-    * `:log` - the level to log. When false, disables controller
-      logging
+  The first plug will run only when action is show or edit. The second plug will
+  always run, except for the index action.
 
-  ## Overriding `action/2` for custom arguments
+  Those guards work like regular Elixir guards and the only variables accessible
+  in the guard are `conn`, the `action` as an atom and the `controller` as an
+  alias.
+
+  ## Controllers are plugs
+
+  Like routers, controllers are plugs, but they are wired to dispatch
+  to a particular function which is called an action.
+
+  For example, the route:
+
+      get "/users/:id", UserController, :show
+
+  will invoke `UserController` as a plug:
+
+      UserController.call(conn, :show)
+
+  which will trigger the plug pipeline and which will eventually
+  invoke the inner action plug that dispatches to the `show/2`
+  function in the `UserController`.
+
+  As controllers are plugs, they implement both `init/1` and
+  `call/2`, and it also provides a function named `action/2`
+  which is responsible for dispatching the appropriate action
+  after the plug stack (and is also overridable).
+
+  ### Overriding `action/2` for custom arguments
 
   Phoenix injects an `action/2` plug in your controller which calls the
   function matched from the router. By default, it passes the conn and params.
   In some cases, overriding the `action/2` plug in your controller is a
-  useful way to inject arguments into your actions that you
-  would otherwise need to fetch off the connection repeatedly. For example,
-  imagine if you stored a `conn.assigns.current_user` in the connection
-  and wanted quick access to the user for every action in your controller:
+  useful way to inject arguments into your actions that you would otherwise
+  need to fetch of the connection repeatedly. For example, imagine if you
+  stored a `conn.assigns.current_user` in the connection and wanted quick
+  access to the user for every action in your controller:
 
       def action(conn, _) do
-        apply(__MODULE__, action_name(conn), [conn,
-                                              conn.params,
-                                              conn.assigns.current_user])
+        args = [conn, conn.params, conn.assigns.current_user]
+        apply(__MODULE__, action_name(conn), args)
       end
 
       def index(conn, _params, user) do
@@ -116,17 +146,86 @@ defmodule Phoenix.Controller do
         video = Repo.get!(user_videos(user), id)
         # ...
       end
+
+  ## Rendering and layouts
+
+  One of the main features provided by controllers is the ability
+  to perform content negotiation and render templates based on
+  information sent by the client. Read `render/3` to learn more.
+
+  It is also important not to confuse `Phoenix.Controller.render/3`
+  with `Phoenix.View.render/3`. The former expects
+  a connection and relies on content negotiation while the latter is
+  connection-agnostic and typically invoked from your views.
   """
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      import Plug.Conn
       import Phoenix.Controller
+
+      # TODO v2: No longer automatically import dependencies
+      import Plug.Conn
 
       use Phoenix.Controller.Pipeline, opts
 
       plug :put_new_layout, {Phoenix.Controller.__layout__(__MODULE__, opts), :app}
       plug :put_new_view, Phoenix.Controller.__view__(__MODULE__)
     end
+  end
+
+  @doc """
+  Registers the plug to call as a fallback to the controller action.
+
+  A fallback plug is useful to translate common domain data structures
+  into a valid `%Plug.Conn{}` response. If the controller action fails to
+  return a `%Plug.Conn{}`, the provided plug will be called and receive
+  the controller's `%Plug.Conn{}` as it was before the action was invoked
+  along with the value returned from the controller action.
+
+  ## Examples
+
+      defmodule MyController do
+        use Phoenix.Controller
+
+        action_fallback MyFallbackController
+
+        def show(conn, %{"id" => id}, current_user) do
+          with {:ok, post} <- Blog.fetch_post(post),
+               :ok <- Authorizer.authorize(current_user, :view, post) do
+
+            render(conn, "show.json", post: post)
+          end
+        end
+      end
+
+  In the above example, `with` is used to match only a successful
+  post fetch, followed by valid authorization for the current user.
+  In the event either of those fail to match, `with` will not invoke
+  the render block and instead returned the unmatched value. In this case,
+  imagine `Blog.fetch_post/2` returned `{:error, :not_found}` or
+  `Authorizer.authorize/3` returned `{:error, :unauthorized}`. For cases
+  where these datastructures serve as return values across multiple
+  boundaries in our domain, a single fallback module can be used to
+  translate the value into a valid response. For example, you could
+  write the following fallback controller to handle the above values:
+
+      defmodule MyFallbackController do
+        use Phoenix.Controller
+
+        def call(conn, {:error, :not_found}) do
+          conn
+          |> put_status(:not_found)
+          |> render(MyErrorView, :"404")
+        end
+
+        def call(conn, {:error, :unauthorized}) do
+          conn
+          |> put_status(403)
+          |> render(MyErrorView, :"403")
+        end
+      end
+  """
+  defmacro action_fallback(plug) do
+    Phoenix.Controller.Pipeline.__action_fallback__(plug)
   end
 
   @doc """
@@ -645,6 +744,51 @@ defmodule Phoenix.Controller do
     send_resp(conn, conn.status || 200, content_type, data)
   end
 
+  defp prepare_assigns(conn, assigns, format) do
+    layout =
+      case layout(conn, assigns, format) do
+        {mod, layout} -> {mod, template_name(layout, format)}
+        false -> false
+      end
+
+    update_in conn.assigns,
+              & &1 |> Map.merge(assigns) |> Map.put(:layout, layout)
+  end
+
+  defp layout(conn, assigns, format) do
+    if format in layout_formats(conn) do
+      case Map.fetch(assigns, :layout) do
+        {:ok, layout} -> layout
+        :error -> layout(conn)
+      end
+    else
+      false
+    end
+  end
+
+  defp to_map(assigns) when is_map(assigns), do: assigns
+  defp to_map(assigns) when is_list(assigns), do: :maps.from_list(assigns)
+
+  defp template_name(name, format) when is_atom(name), do:
+    Atom.to_string(name) <> "." <> format
+  defp template_name(name, _format) when is_binary(name), do:
+    name
+
+  defp send_resp(conn, default_status, default_content_type, body) do
+    conn
+    |> ensure_resp_content_type(default_content_type)
+    |> send_resp(conn.status || default_status, body)
+  end
+
+  defp ensure_resp_content_type(%{resp_headers: resp_headers} = conn, content_type) do
+    if List.keyfind(resp_headers, "content-type", 0) do
+      conn
+    else
+      content_type = content_type <> "; charset=utf-8"
+      %{conn | resp_headers: [{"content-type", content_type}|resp_headers]}
+    end
+  end
+
   @doc """
   Puts the format in the connection.
 
@@ -657,6 +801,90 @@ defmodule Phoenix.Controller do
   """
   def get_format(conn) do
     conn.private[:phoenix_format] || conn.params["_format"]
+  end
+
+  @doc """
+  Sends the given file or binary as a download.
+
+  The second argument must be `{:binary, contents}`, where
+  `contents` will be sent as download, or`{:file, path}`,
+  where `path` is the filesystem location of the file to
+  be sent. Be careful to not interpolate the path from
+  external parameters, as it could allow traversal of the
+  filesystem.
+
+  The download is achieved by setting "content-disposition"
+  to attachment. The "content-type" will also be set based
+  on the extension of the given filename but can be customized
+  via the `:content_type` and `:charset` options.
+
+  ## Options
+
+    * `:filename` - the filename to be presented to the user
+      as download
+    * `:content_type` - the content type of the file or binary
+      sent as download. It is automatically inferred from the
+      filename extension
+    * `:charset` - the charset of the file, such as "utf-8".
+      Defaults to none.
+
+  ## Examples
+
+  To send a file that is stored inside your application priv
+  directory:
+
+      path = Application.app_dir(:my_app, "priv/prospectus.pdf")
+      send_download(conn, {:file, path})
+
+  When using `{:file, path}`, the filename is inferred from the
+  given path must may also be set explicitly.
+
+  To allow the user to download contents that are in memory as
+  a binary or string:
+
+      send_download(conn, {:binary, "world"}, filename: "hello.txt")
+
+  See `Plug.Conn.send_file/3` and `Plug.Conn.send_resp/3` if you
+  would like to access the low-level functions used to send files
+  and responses via Plug.
+  """
+  def send_download(conn, kind, opts \\ [])
+
+  def send_download(conn, {:file, path}, opts) do
+    filename = opts[:filename] || Path.basename(path)
+    conn
+    |> prepare_send_download(filename, opts)
+    |> send_file(conn.status || 200, path)
+  end
+
+  def send_download(conn, {:binary, contents}, opts) do
+    filename = opts[:filename] || raise ":filename option is required when sending binary download"
+    conn
+    |> prepare_send_download(filename, opts)
+    |> send_resp(conn.status || 200, contents)
+  end
+
+  defp prepare_send_download(conn, filename, opts) do
+    content_type = opts[:content_type] || MIME.from_path(filename)
+    encoded_filename = URI.encode_www_form(filename)
+    warn_if_ajax(conn)
+    conn
+    |> put_resp_content_type(content_type, opts[:charset])
+    |> put_resp_header("content-disposition", ~s[attachment; filename="#{encoded_filename}"])
+  end
+
+  defp ajax?(conn) do
+    case get_req_header(conn, "x-requested-with") do
+      [value] -> value in ["XMLHttpRequest", "xmlhttprequest"]
+      [] -> false
+    end
+  end
+
+  defp warn_if_ajax(conn) do
+    if ajax?(conn) do
+      Logger.warn "send_download/3 has been invoked during an AJAX request. " <>
+                  "The download may not work as expected under XMLHttpRequest"
+    end
   end
 
   @doc """
@@ -710,50 +938,6 @@ defmodule Phoenix.Controller do
   defp scrub?(""), do: true
   defp scrub?(_), do: false
 
-  defp prepare_assigns(conn, assigns, format) do
-    layout =
-      case layout(conn, assigns, format) do
-        {mod, layout} -> {mod, template_name(layout, format)}
-        false -> false
-      end
-
-    update_in conn.assigns,
-              & &1 |> Map.merge(assigns) |> Map.put(:layout, layout)
-  end
-
-  defp layout(conn, assigns, format) do
-    if format in layout_formats(conn) do
-      case Map.fetch(assigns, :layout) do
-        {:ok, layout} -> layout
-        :error -> layout(conn)
-      end
-    else
-      false
-    end
-  end
-
-  defp to_map(assigns) when is_map(assigns), do: assigns
-  defp to_map(assigns) when is_list(assigns), do: :maps.from_list(assigns)
-
-  defp template_name(name, format) when is_atom(name), do:
-    Atom.to_string(name) <> "." <> format
-  defp template_name(name, _format) when is_binary(name), do:
-    name
-
-  defp send_resp(conn, default_status, default_content_type, body) do
-    conn
-    |> ensure_resp_content_type(default_content_type)
-    |> send_resp(conn.status || default_status, body)
-  end
-
-  defp ensure_resp_content_type(%{resp_headers: resp_headers} = conn, content_type) do
-    if List.keyfind(resp_headers, "content-type", 0) do
-      conn
-    else
-      content_type = content_type <> "; charset=utf-8"
-      %{conn | resp_headers: [{"content-type", content_type}|resp_headers]}
-    end
-  end
 
   @doc """
   Enables CSRF protection.
@@ -828,7 +1012,7 @@ defmodule Phoenix.Controller do
 
     * the accepted list of arguments contains the "html" format
 
-    * the accept header specified more than one media type preceeded
+    * the accept header specified more than one media type preceded
       or followed by the wildcard media type "`*/*`"
 
   This function raises `Phoenix.NotAcceptableError`, which is rendered
@@ -1009,9 +1193,12 @@ defmodule Phoenix.Controller do
   end
 
   @doc """
-  Returns a previously set flash message or nil.
+  Returns a map of previously set flash messages or an empty map.
 
   ## Examples
+
+      iex> get_flash(conn)
+      %{}
 
       iex> conn = put_flash(conn, :info, "Welcome Back!")
       iex> get_flash(conn)
@@ -1049,6 +1236,87 @@ defmodule Phoenix.Controller do
 
   defp persist_flash(conn, value) do
     put_private(conn, :phoenix_flash, value)
+  end
+
+  @doc """
+  Returns the current request path, with and without query params.
+
+  By default, the connection's query params are included in
+  the generated path. Custom query params may be used instead
+  by providing a map of your own params. You may also retrieve
+  only the request path by passing an empty map of params.
+
+  ## Examples
+
+      iex> current_path(conn)
+      "/users/123?existing=param"
+
+      iex> current_path(conn, %{new: "param"})
+      "/users/123?new=param"
+
+      iex> current_path(conn, %{})
+      "/users/123"
+  """
+  def current_path(%Plug.Conn{query_params: params} = conn) do
+    current_path(conn, params)
+  end
+  def current_path(%Plug.Conn{} = conn, params) when params == %{} do
+    conn.request_path
+  end
+  def current_path(%Plug.Conn{} = conn, params) do
+    conn.request_path <> "?" <> URI.encode_query(params)
+  end
+
+  @doc ~S"""
+  Returns the current request URL, with and without query params.
+
+  The connection's endpoint will be used for URL generation.
+  See `current_path/1` for details on how the request path is generated.
+
+  ## Examples
+
+      iex> current_url(conn)
+      "https://www.example.com/users/123?existing=param"
+
+      iex> current_url(conn, %{new: "param"})
+      "https://www.example.com/users/123?new=param"
+
+      iex> current_path(conn, %{})
+      "https://www.example.com/users/123"
+
+  ## Custom URL Generation
+
+  In some cases, you'll need to generate a request's URL, but
+  using a different scheme, different host, etc. This can be
+  accomplished by concatentating the request path with a
+  custom built URL from your Router helpers, another Endpoint, mix
+  config, or a hand-built string.
+
+  For example, you may way to generate an https URL from an http request.
+  You could define a function like the following:
+
+      def current_secure_url(conn, params \\ %{}) do
+        cur_uri  = Phoenix.Controller.endpoint_module(conn).struct_url()
+        cur_path = Phoenix.Controller.current_path(conn, params)
+
+        MyApp.Router.Helpers.url(%URI{cur_uri | scheme: "https}) <> cur_path
+      end
+
+  Or maybe you have a subdomain based URL for different organizations:
+
+      def organization_url(conn, org, params \\ %{}) do
+        cur_uri  = Phoenix.Controller.endpoint_module(conn).struct_url()
+        cur_path = Phoenix.Controller.current_path(conn, params)
+        org_host = "#{org.slug}.#{cur_uri.host}"
+
+        MyApp.Router.Helpers.url(%URI{cur_uri | host: org_host}) <> cur_path
+      end
+  """
+  def current_url(%Plug.Conn{} = conn) do
+    endpoint_module(conn).url() <> current_path(conn)
+  end
+  def current_url(%Plug.Conn{} = conn, %{} = params) do
+    endpoint_module(conn).url() <> current_path(conn, params)
   end
 
   @doc false

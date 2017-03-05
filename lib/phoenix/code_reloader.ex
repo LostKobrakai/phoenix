@@ -32,7 +32,6 @@ defmodule Phoenix.CodeReloader do
   @behaviour Plug
   import Plug.Conn
 
-
   @style %{
     primary: "#EB532D",
     accent: "#a0b0c0",
@@ -253,7 +252,7 @@ defmodule Phoenix.CodeReloader do
 
   defp format_output(output) do
     output
-    |> String.strip
+    |> String.trim
     |> Plug.HTML.html_escape
   end
 

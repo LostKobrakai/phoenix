@@ -8,7 +8,7 @@ defmodule <%= app_module %>.Mixfile do
      config_path: "../../config/config.exs",
      deps_path: "../../deps",
      lockfile: "../../mix.lock",<% end %>
-     elixir: "~> 1.3",
+     elixir: "~> 1.4",
      elixirc_paths: elixirc_paths(Mix.env),
      compilers: [:phoenix, :gettext] ++ Mix.compilers,
      build_embedded: Mix.env == :prod,
@@ -22,8 +22,7 @@ defmodule <%= app_module %>.Mixfile do
   # Type `mix help compile.app` for more information.
   def application do
     [mod: {<%= app_module %>, []},
-     applications: [:phoenix, :phoenix_pubsub<%= if html do %>, :phoenix_html<% end %>, :cowboy, :logger, :gettext<%= if ecto do %>,
-                    :phoenix_ecto, <%= inspect adapter_app %><% end %>]]
+     extra_applications: [:logger]]
   end
 
   # Specifies which paths to compile per environment.
@@ -36,7 +35,7 @@ defmodule <%= app_module %>.Mixfile do
   defp deps do
     [<%= phoenix_dep %>,
      {:phoenix_pubsub, "~> 1.0"},<%= if ecto do %>
-     {:phoenix_ecto, "~> 3.1-rc"},
+     {:phoenix_ecto, "~> 3.2"},
      {<%= inspect adapter_app %>, ">= 0.0.0"},<% end %><%= if html do %>
      {:phoenix_html, "~> 2.6"},
      {:phoenix_live_reload, "~> 1.0", only: :dev},<% end %>

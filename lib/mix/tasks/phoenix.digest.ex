@@ -1,8 +1,6 @@
 defmodule Mix.Tasks.Phoenix.Digest do
   use Mix.Task
-  @default_input_path "priv/static"
 
-  @shortdoc "Digests and compresses static files"
   @recursive true
 
   @moduledoc """
@@ -23,7 +21,7 @@ defmodule Mix.Tasks.Phoenix.Digest do
     * the file compressed with gzip
     * a file containing the original file name and its digest
     * a compressed file containing the file name and its digest
-    * a manifest file
+    * a cache manifest file
 
   Example of generated files:
 
@@ -31,26 +29,11 @@ defmodule Mix.Tasks.Phoenix.Digest do
     * app.js.gz
     * app-eb0a5b9302e8d32828d8a73f137cc8f0.js
     * app-eb0a5b9302e8d32828d8a73f137cc8f0.js.gz
-    * manifest.json
+    * cache_manifest.json
   """
 
   def run(args) do
-    {opts, args, _} = OptionParser.parse(args, aliases: [o: :output])
-    input_path  = List.first(args) || @default_input_path
-    output_path = opts[:output] || input_path
-
-    {:ok, _} = Application.ensure_all_started(:phoenix)
-
-    case Phoenix.Digester.compile(input_path, output_path) do
-      :ok ->
-        # We need to call build structure so everything we have
-        # generated into priv is copied to _build in case we have
-        # build_embedded set to true. In case it's not true,
-        # build structure is mostly a no-op, so we are fine.
-        Mix.Project.build_structure()
-        Mix.shell.info [:green, "Check your digested files at #{inspect output_path}"]
-      {:error, :invalid_path} ->
-        Mix.shell.error "The input path #{inspect input_path} does not exist"
-    end
+    IO.puts :stderr, "mix phoenix.digest is deprecated. Use phx.digest instead."
+    Mix.Tasks.Phx.Digest.run(args)
   end
 end

@@ -1,8 +1,4 @@
 defmodule Mix.Tasks.Phoenix.Gen.Json do
-  use Mix.Task
-
-  @shortdoc "Generates a controller and model for a JSON based resource"
-
   @moduledoc """
   Generates a Phoenix resource.
 
@@ -23,7 +19,10 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
   with `--no-model`. Read the documentation for `phoenix.gen.model`
   for more information on attributes and namespaced resources.
   """
+  use Mix.Task
+
   def run(args) do
+    IO.puts :stderr, "mix phoenix.gen.json is deprecated. Use phx.gen.json instead."
     switches = [binary_id: :boolean, model: :boolean]
 
     {opts, parsed, _} = OptionParser.parse(args, switches: switches)
@@ -32,13 +31,13 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
     default_opts = Application.get_env(:phoenix, :generators, [])
     opts = Keyword.merge(default_opts, opts)
 
-    attrs   = Mix.Phoenix.attrs(attrs)
+    attrs   = Mix.Phoenix.Schema.attrs(attrs)
     binding = Mix.Phoenix.inflect(singular)
     path    = binding[:path]
     route   = String.split(path, "/") |> Enum.drop(-1) |> Kernel.++([plural]) |> Enum.join("/")
     binding = binding ++ [plural: plural, route: route,
                           sample_id: sample_id(opts),
-                          attrs: attrs, params: Mix.Phoenix.params(attrs)]
+                          attrs: attrs, params: Mix.Phoenix.Schema.params(attrs)]
 
     Mix.Phoenix.check_module_name_availability!(binding[:module] <> "Controller")
     Mix.Phoenix.check_module_name_availability!(binding[:module] <> "View")

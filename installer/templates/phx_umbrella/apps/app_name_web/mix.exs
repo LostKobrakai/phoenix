@@ -8,21 +8,21 @@ defmodule <%= web_namespace %>.Mixfile do
      config_path: "../../config/config.exs",
      deps_path: "../../deps",
      lockfile: "../../mix.lock",
-     elixir: "~> 1.3",
+     elixir: "~> 1.4",
      elixirc_paths: elixirc_paths(Mix.env),
      compilers: [:phoenix, :gettext] ++ Mix.compilers,
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     deps: deps]
+     aliases: aliases(),
+     deps: deps()]
   end
 
   # Configuration for the OTP application.
   #
   # Type `mix help compile.app` for more information.
   def application do
-    [mod: {<%= web_namespace %>, []},
-     applications: [:phoenix<%= if html do %>, :phoenix_html<% end %>, :cowboy, :logger, :gettext,
-                    <%= if ecto do %>:phoenix_ecto,<% end %> :<%= app_name %>]]
+    [mod: {<%= web_namespace %>.Application, []},
+     extra_applications: [:logger]]
   end
 
   # Specifies which paths to compile per environment.
@@ -35,11 +35,19 @@ defmodule <%= web_namespace %>.Mixfile do
   defp deps do
     [<%= phoenix_dep %>,
      {:phoenix_pubsub, "~> 1.0"},<%= if ecto do %>
-     {:phoenix_ecto, "~> 3.1-rc"},<% end %><%= if html do %>
+     {:phoenix_ecto, "~> 3.2"},<% end %><%= if html do %>
      {:phoenix_html, "~> 2.6"},
      {:phoenix_live_reload, "~> 1.0", only: :dev},<% end %>
      {:gettext, "~> 0.11"},
      {:<%= app_name %>, in_umbrella: true},
      {:cowboy, "~> 1.0"}]
+  end
+
+  # Aliases are shortcuts or tasks specific to the current project.<%= if ecto do %>
+  # For example, we extend the test task to create and migrate the database.<% end %>
+  #
+  # See the documentation for `Mix` for more info on aliases.
+  defp aliases do
+    [<%= if ecto do %>"test": ["ecto.create --quiet", "ecto.migrate", "test"]<% end %>]
   end
 end

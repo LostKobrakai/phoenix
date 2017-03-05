@@ -281,6 +281,19 @@ defmodule Phoenix.Channel.Server do
     end)
   end
 
+  @doc false
+  # TODO: Revisit in future GenServer releases
+  def unhandled_handle_info(msg, state) do
+    proc =
+      case Process.info(self(), :registered_name) do
+        {_, []}   -> self()
+        {_, name} -> name
+      end
+    :error_logger.warning_msg('~p ~p received unexpected message in handle_info/2: ~p~n',
+                              [__MODULE__, proc, msg])
+    {:noreply, state}
+  end
+
   ## Handle results
 
   defp handle_result({:reply, reply, %Socket{} = socket}, callback) do
@@ -290,10 +303,16 @@ defmodule Phoenix.Channel.Server do
 
   defp handle_result({:stop, reason, reply, socket}, callback) do
     handle_reply(socket, reply, callback)
-    {:stop, reason, socket}
+    handle_result({:stop, reason, socket}, callback)
   end
 
   defp handle_result({:stop, reason, socket}, _callback) do
+    case reason do
+      :normal -> notify_transport_of_graceful_exit(socket)
+      :shutdown -> notify_transport_of_graceful_exit(socket)
+      {:shutdown, _} -> notify_transport_of_graceful_exit(socket)
+      _ -> :noop
+    end
     {:stop, reason, socket}
   end
 
@@ -368,5 +387,11 @@ defmodule Phoenix.Channel.Server do
     Channel replies can only be sent from a `handle_in/3` callback.
     Use `push/3` to send an out-of-band message down the socket
     """
+  end
+
+  defp notify_transport_of_graceful_exit(socket) do
+    Phoenix.Socket.Transport.notify_graceful_exit(socket)
+    Process.unlink(socket.transport_pid)
+    :ok
   end
 end

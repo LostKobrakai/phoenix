@@ -3,8 +3,8 @@ defmodule Phoenix.Transports.LongPoll.Supervisor do
 
   use Supervisor
 
-  def start_link do
-    Supervisor.start_link(__MODULE__, [], name: __MODULE__)
+  def start_link(options) do
+    Supervisor.start_link(__MODULE__, [], options)
   end
 
   def init([]) do
@@ -112,6 +112,11 @@ defmodule Phoenix.Transports.LongPoll.Server do
     end
   end
 
+  def handle_info({:graceful_exit, channel_pid, %Phoenix.Socket.Message{} = msg}, state) do
+    new_state = delete(state, msg.topic, channel_pid)
+    publish_reply(msg, new_state)
+  end
+
   def handle_info({:subscribe, client_ref, ref}, state) do
     broadcast_from!(state, client_ref, {:subscribe, ref})
     {:noreply, state}
@@ -162,7 +167,7 @@ defmodule Phoenix.Transports.LongPoll.Server do
     {:noreply, %{state | buffer: [msg | state.buffer]}}
   end
 
-  defp now_ms, do: System.system_time(:milli_seconds)
+  defp now_ms, do: System.system_time(:milliseconds)
 
   defp schedule_inactive_shutdown(window_ms) do
     Process.send_after(self(), :shutdown_if_inactive, window_ms)

@@ -17,14 +17,10 @@ defmodule Phoenix.Socket.Transport do
 
   ## The transport behaviour
 
-  The transport requires two functions:
+  The transport requires one function:
 
     * `default_config/0` - returns the default transport configuration
       to be merged when the transport is declared in the socket module
-
-    * `handlers/0` - returns a map of handlers. For example, if the
-      transport is implemented via Cowboy, it just need to specify the
-      appropriate Cowboy handler
 
   ## Socket connections
 
@@ -62,18 +58,23 @@ defmodule Phoenix.Socket.Transport do
   serializer that abides to the behaviour described in
   `Phoenix.Transports.Serializer`.
 
-  ## Managing channels
+  ## Managing channel exits
 
   Because channels are spawned from the transport process, transports
   must trap exits and correctly handle the `{:EXIT, _, _}` messages
   arriving from channels, relaying the proper response to the client.
 
-  The following events are sent by the transport when a channel exits:
+  The `"phx_error"` event is sent by the transport when a channel exits,
+  and represents the channel terminating against its will. The
+  `on_exit_message/3` function aids in constructing the `"phx_error"` message.
 
-    * `"phx_close"` - The channel has exited gracefully
-    * `"phx_error"` - The channel has crashed
+  For graceful exits, the channel will notify the transort it is
+  gracefully terminating via the following message:
 
-  The `on_exit_message/3` function aids in constructing these messages.
+      {:graceful_exit, channel_pid, %Phoenix.Socket.Message{}}
+
+  The `%Phoenix.Socket.Message{}` is the leave message for the transport
+  to relay to the client.
 
   ## Duplicate Join Subscriptions
 
@@ -227,9 +228,18 @@ defmodule Phoenix.Socket.Transport do
     |> do_dispatch(msg, socket)
   end
 
-  defp do_dispatch(nil, %{event: "phx_join", topic: topic} = msg, socket) do
-    if channel = socket.handler.__channel__(topic, socket.transport_name) do
-      socket = %Socket{socket | topic: topic, channel: channel}
+  @doc false
+  def build_channel_socket(%Socket{} = socket, channel, topic, join_ref) do
+    %Socket{socket |
+            topic: topic,
+            channel: channel,
+            join_ref: join_ref,
+            private: channel.__socket__(:private)}
+  end
+
+  defp do_dispatch(nil, %{event: "phx_join", topic: topic} = msg, base_socket) do
+    if channel = base_socket.handler.__channel__(topic, base_socket.transport_name) do
+      socket = build_channel_socket(base_socket, channel, topic, msg.ref)
 
       case Phoenix.Channel.Server.join(socket, msg.payload) do
         {:ok, response, pid} ->
@@ -241,7 +251,7 @@ defmodule Phoenix.Socket.Transport do
           {:error, reason, %Reply{ref: msg.ref, topic: topic, status: :error, payload: reason}}
       end
     else
-      reply_ignore(msg, socket)
+      reply_ignore(msg, base_socket)
     end
   end
 
@@ -273,18 +283,21 @@ defmodule Phoenix.Socket.Transport do
   @doc """
   Returns the message to be relayed when a channel exits.
   """
-  # TODO remove 2-arity on next major release
+  def on_exit_message(topic, join_ref, _reason) do
+    %Message{ref: join_ref, topic: topic, event: "phx_error", payload: %{}}
+  end
+
+  # TODO v2: Remove 2-arity
+  @doc false
   def on_exit_message(topic, reason) do
-    IO.write :stderr, "Phoenix.Transport.on_exit_message/2 is deprecated. Use on_exit_message/3 instead."
+    IO.warn "Phoenix.Transport.on_exit_message/2 is deprecated. Use on_exit_message/3 instead."
     on_exit_message(topic, nil, reason)
   end
-  def on_exit_message(topic, join_ref, reason) do
-    case reason do
-      :normal        -> %Message{ref: join_ref, topic: topic, event: "phx_close", payload: %{}}
-      :shutdown      -> %Message{ref: join_ref, topic: topic, event: "phx_close", payload: %{}}
-      {:shutdown, _} -> %Message{ref: join_ref, topic: topic, event: "phx_close", payload: %{}}
-      _              -> %Message{ref: join_ref, topic: topic, event: "phx_error", payload: %{}}
-    end
+
+  @doc false
+  def notify_graceful_exit(%Socket{topic: topic, join_ref: ref} = socket) do
+    close_msg = %Message{ref: ref, topic: topic, event: "phx_close", payload: %{}}
+    send(socket.transport_pid, {:graceful_exit, self(), close_msg})
   end
 
   @doc """
@@ -310,7 +323,7 @@ defmodule Phoenix.Socket.Transport do
       opts =
         if force_ssl = Keyword.get(opts, :force_ssl, endpoint.config(:force_ssl)) do
           force_ssl
-          |> Keyword.put_new(:host, host_to_binary(endpoint.config(:url)[:host]) || "localhost")
+          |> Keyword.put_new(:host, {endpoint, :host, []})
           |> Plug.SSL.init()
         end
       {:cache, opts}
@@ -433,6 +446,7 @@ defmodule Phoenix.Socket.Transport do
   defp compare_host?(request_host, allowed_host),
     do: request_host == allowed_host
 
+  # TODO v1.4: Deprecate {:system, env_var}
   defp host_to_binary({:system, env_var}), do: host_to_binary(System.get_env(env_var))
   defp host_to_binary(host), do: host
 end

@@ -325,7 +325,9 @@ defmodule Phoenix.ChannelTest do
   """
   def join(%Socket{} = socket, channel, topic, payload \\ %{})
       when is_atom(channel) and is_binary(topic) and is_map(payload) do
-    socket = %Socket{socket | topic: topic, channel: channel}
+
+    ref = System.unique_integer([:positive])
+    socket = Transport.build_channel_socket(socket, channel, topic, ref)
 
     case Server.join(socket, payload) do
       {:ok, reply, pid} ->
@@ -558,6 +560,8 @@ defmodule Phoenix.ChannelTest do
   end
 
   @doc false
+  def __stringify__(%{__struct__: _} = struct),
+    do: struct
   def __stringify__(%{} = params),
     do: Enum.into(params, %{}, &stringify_kv/1)
   def __stringify__(other),

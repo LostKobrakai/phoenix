@@ -1,87 +1,5 @@
 defmodule Phoenix.Controller.Pipeline do
-  @moduledoc """
-  This module implements the controller pipeline responsible for handling requests.
-
-  ## The pipeline
-
-  The goal of a controller is to receive a request and invoke the desired
-  action. The whole flow of the controller is managed by a single pipeline:
-
-      defmodule UserController do
-        use Phoenix.Controller
-        require Logger
-
-        plug :log_message, "before action"
-
-        def show(conn, _params) do
-          Logger.debug "show/2"
-          send_resp(conn, 200, "OK")
-        end
-
-        defp log_message(conn, msg) do
-          Logger.debug msg
-          conn
-        end
-      end
-
-  When invoked, this pipeline will print:
-
-      before action
-      show/2
-
-  As any other Plug pipeline, we can halt at any step by calling
-  `Plug.Conn.halt/1` (which is by default imported into controllers).
-  If we change `log_message/2` to:
-
-      def log_message(conn, msg) do
-        Logger.debug msg
-        halt(conn)
-      end
-
-  it will print only:
-
-      before action
-
-  As the rest of the pipeline (the action and the after action plug)
-  will never be invoked.
-
-  ## Guards
-
-  `plug/2` supports guards, allowing a developer to configure a plug to only
-  run in some particular action:
-
-      plug :log_message, "before show and edit" when action in [:show, :edit]
-      plug :log_message, "before all but index" when not action in [:index]
-
-  The first plug will run only when action is show or edit.
-  The second plug will always run, except for the index action.
-
-  Those guards work like regular Elixir guards and the only variables accessible
-  in the guard are `conn`, the `action` as an atom and the `controller` as an
-  alias.
-
-  ## Controllers are plugs
-
-  Like routers, controllers are plugs, but they are wired to dispatch
-  to a particular function which is called an action.
-
-  For example, the route:
-
-      get "/users/:id", UserController, :show
-
-  will invoke `UserController` as a plug:
-
-      UserController.call(conn, :show)
-
-  which will trigger the plug pipeline and which will eventually
-  invoke the inner action plug that dispatches to the `show/2`
-  function in the `UserController`.
-
-  As controllers are plugs, they implement both `init/1` and
-  `call/2`, and it also provides a function named `action/2`
-  which is responsible for dispatching the appropriate action
-  after the plug stack (and is also overridable).
-  """
+  @moduledoc false
 
   @doc false
   defmacro __using__(opts) do
@@ -89,19 +7,18 @@ defmodule Phoenix.Controller.Pipeline do
       @behaviour Plug
 
       require Phoenix.Endpoint
-
       import Phoenix.Controller.Pipeline
+
       Module.register_attribute(__MODULE__, :plugs, accumulate: true)
       @before_compile Phoenix.Controller.Pipeline
       @phoenix_log_level Keyword.get(opts, :log, :debug)
+      @phoenix_fallback :unregistered
 
       @doc false
-      def init(action) when is_atom(action) do
-        action
-      end
+      def init(opts), do: opts
 
       @doc false
-      def call(conn, action) do
+      def call(conn, action) when is_atom(action) do
         conn = update_in conn.private,
                  &(&1 |> Map.put(:phoenix_controller, __MODULE__)
                       |> Map.put(:phoenix_action, action))
@@ -113,7 +30,7 @@ defmodule Phoenix.Controller.Pipeline do
       end
 
       @doc false
-      def action(%{private: %{phoenix_action: action}} = conn, _options) do
+      def action(%Plug.Conn{private: %{phoenix_action: action}} = conn, _options) do
         apply(__MODULE__, action, [conn, conn.params])
       end
 
@@ -122,21 +39,60 @@ defmodule Phoenix.Controller.Pipeline do
   end
 
   @doc false
+  def __action_fallback__(plug) do
+    quote bind_quoted: [plug: plug] do
+      @phoenix_fallback Phoenix.Controller.Pipeline.validate_fallback(
+        plug,
+        __MODULE__,
+        Module.get_attribute(__MODULE__, :phoenix_fallback))
+    end
+  end
+
+  @doc false
+  def validate_fallback(plug, module, fallback) do
+    cond do
+      fallback == nil ->
+        raise """
+        action_fallback can only be called when using Phoenix.Controller.
+        Add `use Phoenix.Controller` to #{inspect module}
+        """
+
+      fallback != :unregistered ->
+        raise "action_fallback can only be called a single time per controller."
+
+      not is_atom(plug) ->
+        raise ArgumentError, "expected action_fallback to be a module or function plug, got #{inspect plug}"
+
+      fallback == :unregistered ->
+        case Atom.to_charlist(plug) do
+          ~c"Elixir." ++ _ -> {:module, plug}
+          _                -> {:function, plug}
+        end
+    end
+  end
+
+  @doc false
   defmacro __before_compile__(env) do
     action = {:action, [], true}
     plugs  = [action|Module.get_attribute(env.module, :plugs)]
     {conn, body} = Plug.Builder.compile(env, plugs, log_on_halt: :debug)
+    fallback_ast =
+      env.module
+      |> Module.get_attribute(:phoenix_fallback)
+      |> build_fallback()
 
     quote do
       defoverridable [action: 2]
-
-      def action(conn, opts) do
+      def action(var!(conn_before), opts) do
         try do
-          super(conn, opts)
+          var!(conn_after) = super(var!(conn_before), opts)
+          unquote(fallback_ast)
         catch
           kind, reason ->
             Phoenix.Controller.Pipeline.__catch__(
-              kind, reason, __MODULE__, conn.private.phoenix_action, System.stacktrace
+              var!(conn_before), kind, reason, __MODULE__,
+              var!(conn_before).private.phoenix_action,
+              System.stacktrace()
             )
         end
       end
@@ -153,14 +109,34 @@ defmodule Phoenix.Controller.Pipeline do
     end
   end
 
+  defp build_fallback(:unregistered) do
+    quote do: var!(conn_after)
+  end
+  defp build_fallback({:module, plug}) do
+    quote bind_quoted: binding() do
+      case var!(conn_after) do
+        %Plug.Conn{} = conn_after -> conn_after
+        val -> plug.call(var!(conn_before), plug.init(val))
+      end
+    end
+  end
+  defp build_fallback({:function, plug}) do
+    quote do
+      case var!(conn_after) do
+        %Plug.Conn{} = conn_after -> conn_after
+        val -> unquote(plug)(var!(conn_before), val)
+      end
+    end
+  end
+
   @doc false
-  def __catch__(:error, :function_clause, controller, action,
+  def __catch__(%Plug.Conn{}, :error, :function_clause, controller, action,
                 [{controller, action, [%Plug.Conn{} = conn | _], _loc} | _] = stack) do
     args = [controller: controller, action: action, params: conn.params]
     reraise Phoenix.ActionClauseError, args, stack
   end
-  def __catch__(kind, reason, _controller, _action, stack) do
-    :erlang.raise(kind, reason, stack)
+  def __catch__(%Plug.Conn{} = conn, kind, reason, _controller, _action, _stack) do
+    Plug.Conn.WrapperError.reraise(conn, kind, reason)
   end
 
   @doc """

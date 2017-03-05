@@ -1,16 +1,18 @@
-defmodule Phoenix.New.Mixfile do
+defmodule Phx.New.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :phoenix_new,
-     version: "1.2.0",
-     elixir: "~> 1.3"]
+    [app: :phx_new,
+     build_embedded: Mix.env == :prod,
+     start_permanent: Mix.env == :prod,
+     version: "1.3.0-rc.0",
+     elixir: "~> 1.3 or ~> 1.4"]
   end
 
   # Configuration for the OTP application
   #
   # Type `mix help compile.app` for more information
   def application do
-    [applications: []]
+    [extra_applications: []]
   end
 end

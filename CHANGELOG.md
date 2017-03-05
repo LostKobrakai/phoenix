@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.3.0-rc.0 (2017-03-01)
+
+See these [`1.2.x` to `1.3.x` upgrade instructions](https://gist.github.com/chrismccord/71ab10d433c98b714b75c886eff17357) to bring your existing apps up to speed.
+
+* Enhancements
+  * [Generator] Add new `phx.new`, `phx.new.web`, `phx.new.ecto` project generators with improved application structure and support for umbrella applications
+  * [Generator] Add new `phx.gen.html` and `phx.gen.json` resource generators with improved isolation of API boundaries
+  * [Controller] Add `current_path` and `current_url` to generate a connection's path and url
+  * [Controller] Introduce `action_fallback` to registers a plug to call as a fallback to the controller action
+  * [Controller] Wrap exceptions at controller to maintain connection state
+  * [Channel] Add ability to configure channel event logging with `:log_join` and `:log_handle_in` options
+  * [Channel] Warn on unhandled `handle_info/2` messages
+  * [Channel] Channels now distinguish from graceful exits and application restarts, allowing clients to enter error mode and reconnected after cold deploys.
+  * [Router] Document `match` support for matching on any HTTP method with the special `:*` argument
+  * [Router] Populate `conn.path_params` with path parameters for the route
+  * [ConnTest] Add `redirected_params/1` to return the named params matched in the router for the redirected URL
+  * [Digester] Add `mix phx.digest.clean` to remove old versions of compiled assets
+
+* Deprecations
+  * [Generator] All `phoenix.*` mix tasks have been deprecated in favor of new `phx.*` tasks
+
+* JavaScript client enhancements
+  * Add ability to pass `encode` and `decode` functions to socket constructor for custom encoding and decoding of outgoing and incoming messages.
+  * Detect heartbeat timeouts on client to handle ungraceful connection loss for faster socket error detection
+  * Add support for AMD/RequireJS
+
 ## 1.2.1 (2016-8-11)
 
 * Enhancements

@@ -10,16 +10,16 @@ defprotocol Phoenix.Param do
   Phoenix knows how to extract the `:id` from `@user` thanks
   to this protocol.
 
-  By default, Phoenix implements this protocol for integers,
-  binaries, atoms, maps and structs. For maps and structs, a
-  key `:id` is looked up.
+  By default, Phoenix implements this protocol for integers, binaries, atoms,
+  and structs. For structs, a key `:id` is assumed, but you may provide a
+  specific implementation.
 
   Nil values cannot be converted to param.
 
   ## Custom parameters
 
-  In order to customize the parameter for any model or
-  struct, one can simply implement this protocol.
+  In order to customize the parameter for any struct,
+  one can simply implement this protocol.
 
   However, for convenience, this protocol can also be
   derivable. For example:
@@ -81,10 +81,6 @@ end
 
 defimpl Phoenix.Param, for: Any do
   defmacro __deriving__(module, struct, options) do
-    deriving(module, struct, options)
-  end
-
-  def deriving(module, struct, options) do
     key = Keyword.get(options, :key, :id)
 
     unless Map.has_key?(struct, key) do

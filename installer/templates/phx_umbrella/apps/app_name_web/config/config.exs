@@ -5,10 +5,11 @@
 # is restricted to this project.
 use Mix.Config
 
-<%= if namespaced? or ecto do %># General application configuration
+<%= if namespaced? || ecto || generators do %># General application configuration
 config :<%= web_app_name %><%= if namespaced? do %>,
   namespace: <%= web_namespace %><% end %><%= if ecto do %>,
-  ecto_repos: []<% end %>
+  ecto_repos: [<%= app_module %>.Repo]<% end %><%= if generators do %>,
+  generators: <%= inspect generators %><% end %>
 
 <% end %># Configures the endpoint
 config :<%= web_app_name %>, <%= endpoint_module %>,

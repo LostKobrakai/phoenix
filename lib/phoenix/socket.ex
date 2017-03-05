@@ -62,6 +62,7 @@ defmodule Phoenix.Socket do
     * `handler` - The socket module where this socket originated, for example: `MyApp.UserSocket`
     * `joined` - If the socket has effectively joined the channel
     * `pubsub_server` - The registered name of the socket's pubsub server
+    * `join_ref` - The ref sent by the client when joining
     * `ref` - The latest ref sent by the client
     * `topic` - The string topic, for example `"room:123"`
     * `transport` - The socket's transport, for example: `Phoenix.Transports.WebSocket`
@@ -121,7 +122,7 @@ defmodule Phoenix.Socket do
   end
 
   @type t :: %Socket{id: nil,
-                     assigns: %{},
+                     assigns: map,
                      channel: atom,
                      channel_pid: pid,
                      endpoint: atom,
@@ -133,7 +134,8 @@ defmodule Phoenix.Socket do
                      transport: atom,
                      transport_name: atom,
                      serializer: atom,
-                     transport_pid: pid}
+                     transport_pid: pid,
+                     private: %{}}
 
   defstruct id: nil,
             assigns: %{},
@@ -144,11 +146,13 @@ defmodule Phoenix.Socket do
             joined: false,
             pubsub_server: nil,
             ref: nil,
+            join_ref: nil,
             topic: nil,
             transport: nil,
             transport_pid: nil,
             transport_name: nil,
-            serializer: nil
+            serializer: nil,
+            private: %{}
 
   defmacro __using__(_) do
     quote do
@@ -247,7 +251,7 @@ defmodule Phoenix.Socket do
 
   The `channel` macro accepts topic patterns in two flavors. A splat argument
   can be provided as the last character to indicate a "topic:subtopic" match. If
-  a plain string is provied, only that topic will match the channel handler.
+  a plain string is provided, only that topic will match the channel handler.
   Most use-cases will use the "topic:*" pattern to allow more versatile topic
   scoping.
 

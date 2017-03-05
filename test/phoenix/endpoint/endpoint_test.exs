@@ -8,7 +8,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
            static_url: [host: "static.example.com"],
            server: false, http: [port: 80], https: [port: 443],
            force_ssl: [subdomains: true],
-           cache_static_manifest: "../../../../test/fixtures/manifest.json",
+           cache_static_manifest: "../../../../test/fixtures/cache_manifest.json",
            pubsub: [adapter: Phoenix.PubSub.PG2, name: :endpoint_pub]]
   Application.put_env(:phoenix, __MODULE__.Endpoint, @config)
 
@@ -37,17 +37,16 @@ defmodule Phoenix.Endpoint.EndpointTest do
     config =
       @config
       |> put_in([:url, :port], 1234)
-      |> put_in([:url, :path], "/")
       |> put_in([:static_url, :port], 456)
 
     assert Endpoint.config_change([{Endpoint, config}], []) == :ok
     assert Enum.sort(Endpoint.config(:url)) ==
-           [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/", port: 1234]
+           [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/api", port: 1234]
     assert Enum.sort(Endpoint.config(:static_url)) ==
            [host: "static.example.com", port: 456]
     assert Endpoint.url == "https://example.com:1234"
     assert Endpoint.static_url == "https://static.example.com:456"
-    assert Endpoint.struct_url == %URI{scheme: "https", host: "example.com", port: 1234, path: nil}
+    assert Endpoint.struct_url == %URI{scheme: "https", host: "example.com", port: 1234, path: "/api"}
   end
 
   test "sets script name when using path" do
@@ -74,22 +73,32 @@ defmodule Phoenix.Endpoint.EndpointTest do
     assert Endpoint.static_path("/foo.css") == "/foo-d978852bea6530fcd197b5445ed008fd.css?vsn=d"
 
     # Trigger a config change and the cache should be warmed up again
-    config =
-      @config
-      |> put_in([:cache_static_manifest], "../../../../test/fixtures/manifest_upgrade.json")
+    config = put_in(@config[:cache_static_manifest], "../../../../test/fixtures/cache_manifest_upgrade.json")
 
     assert Endpoint.config_change([{Endpoint, config}], []) == :ok
-
     assert Endpoint.static_path("/foo.css") == "/foo-ghijkl.css?vsn=d"
   end
 
   test "warms up cache from previous manifest format" do
-    config =
-      @config
-      |> put_in([:cache_static_manifest], "../../../../test/fixtures/old_manifest.json")
-
+    config = put_in(@config, [:cache_static_manifest], "../../../../test/fixtures/old_cache_manifest.json")
     assert Endpoint.config_change([{Endpoint, config}], []) == :ok
     assert Endpoint.static_path("/foo.css") == "/foo-d978852bea6530fcd197b5445ed008fd.css?vsn=d"
+  end
+
+  test "invokes on_init callback" do
+    Application.put_env(:phoenix, __MODULE__.OnInitEndpoint,
+                        on_init: {__MODULE__.OnInitEndpoint, :sample, [:sample]},
+                        parent: self())
+    defmodule OnInitEndpoint do
+      use Phoenix.Endpoint, otp_app: :phoenix
+
+      def sample(opts, :sample) do
+        send opts[:parent], {self(), :sample}
+        {:ok, opts}
+      end
+    end
+    {:ok, pid} = OnInitEndpoint.start_link
+    assert_receive {^pid, :sample}
   end
 
   test "uses url configuration for static path" do
@@ -98,6 +107,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
       use Phoenix.Endpoint, otp_app: :phoenix
     end
     UrlEndpoint.start_link
+    assert UrlEndpoint.path("/phoenix.png") =~ "/api/phoenix.png"
     assert UrlEndpoint.static_path("/phoenix.png") =~ "/api/phoenix.png"
   end
 
@@ -107,6 +117,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
       use Phoenix.Endpoint, otp_app: :phoenix
     end
     StaticEndpoint.start_link
+    assert StaticEndpoint.path("/phoenix.png") =~ "/phoenix.png"
     assert StaticEndpoint.static_path("/phoenix.png") =~ "/static/phoenix.png"
   end
 

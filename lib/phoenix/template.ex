@@ -30,7 +30,7 @@ defmodule Phoenix.Template do
 
   ## Rendering
 
-  In some cases, you will want to overide the `render/2` clause
+  In some cases, you will want to override the `render/2` clause
   to compose the assigns for the template before rendering. In such
   cases, you can render the template directly by calling the generated
   private function `render_template/2`. For example:
@@ -373,7 +373,7 @@ defmodule Phoenix.Template do
   defp compile(path, root) do
     name   = template_path_to_name(path, root)
     defp   = String.to_atom(name)
-    ext    = Path.extname(path) |> String.lstrip(?.) |> String.to_atom
+    ext    = Path.extname(path) |> String.trim_leading(".") |> String.to_atom
     engine = Map.fetch!(engines(), ext)
     quoted = engine.compile(path, name)
 
